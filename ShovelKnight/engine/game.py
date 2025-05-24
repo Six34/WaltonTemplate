@@ -44,6 +44,7 @@ class Game(ABC):
 
             self.draw()
             self.update()
+            
 
             pg_display.update()
             self.clock.tick(self.fps)

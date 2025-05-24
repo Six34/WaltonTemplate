@@ -14,6 +14,7 @@ class Animation:
 
         self.frames = frames  # animation frames
         self.repeat = repeat  # repeat animation
+        
 
     def tick(self):
         if not self.stopped:
@@ -35,3 +36,6 @@ class Animation:
 
     def frame(self):
         return self.frames[self.i]
+    
+
+

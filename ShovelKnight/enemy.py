@@ -21,6 +21,7 @@ class Beeto(Entity):
         
         self.health = 1
         self.dead = False
+        self.debug_mode = True
 
     def move(self, tiles):
         if self.dead:
@@ -63,6 +64,25 @@ class Beeto(Entity):
                     self.rect.top = tile.rect.bottom
                     self.collision['top'] = True
                     self.vy = 0
+                    
+    def die(self):
+        if self.debug_mode:
+            print("Enemy died!")
+        self.dead = True
+        # Remove enemy from level.entities to properly despawn
+        if hasattr(self, 'level') and hasattr(self.level, 'entities'):
+            if self in self.level.entities:
+                self.level.entities.remove(self)
+                
+    def take_damage(self, damage):
+        if self.dead:
+            return
+            
+        print(f"Enemy taking {damage} damage! Current health: {self.health}")
+        self.health -= damage
+        if self.health <= 0:
+            self.die()
+        return True
 
     def on_event(self, event):
         pass

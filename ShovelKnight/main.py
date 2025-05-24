@@ -48,6 +48,8 @@ class ShovelKnight(Game):
                 self.player = entity
             else: 
                 self.enemies.append(entity)
+                # Set a reference to the level for each enemy
+                entity.level = self.level
         
         if self.player is None and len(self.level.entities) > 0:
             self.player = self.level.entities[0]
@@ -107,22 +109,27 @@ class ShovelKnight(Game):
         
         # Normal game update
         if self.game_state == "running":
+            # Update all entities first
             for entity in self.level.entities:
                 entity.update(self.level.tiles)
                 
+            # Now handle player-enemy interactions
             if self.player and hasattr(self.player, 'check_enemy_collisions'):
-                self.player.check_enemy_collisions(self.enemies)
+                # Pass the current list of enemies
+                current_enemies = [e for e in self.level.entities if e != self.player]
+                self.player.check_enemy_collisions(current_enemies)
                 
-                for enemy in list(self.enemies):
-                    if enemy not in self.level.entities:
-                        self.enemies.remove(enemy)
+                # Update our enemies list
+                self.enemies = current_enemies
                         
             # Check if the player has died
             if self.player and self.player.dead:
                 self.game_state = "game_over"
                 print("Game over - Press R to restart or Q to quit")
 
-            self.camera.move(self.level.entities[0])
+            # Update camera
+            if self.level.entities:
+                self.camera.move(self.level.entities[0])
             
     def on_event(self, event):
         # Handle quit event
