@@ -21,7 +21,7 @@ class Beeto(Entity):
         
         self.health = 1
         self.dead = False
-        self.debug_mode = True
+        self.debug_mode = False
 
     def move(self, tiles):
         if self.dead:

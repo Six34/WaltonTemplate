@@ -10,14 +10,15 @@ sprites = SpriteSheet('ShovelKnight/assets/images/knight.png', {
     'walk': [(2+42*i, 77, 40, 35) for i in range(5)],
     'jump': (2, 114, 31, 34),
     'fall': (2, 150, 33, 34),
-    'slash': [(2+56*i, 186, 54, 35) for i in range(5)],  # This is actually the shovel attack animation
-    # 'shine': [(2+36*i, 323, 34, 32) for i in range(3)],
+    'slash': [(2+56*i, 186, 54, 35) for i in range(5)],  
+    'climb': [(2, 262, 25, 27), (29, 262, 25, 27)], 
     'hurt': (2, 258, 33, 32),
 })
 
 animations = {
     'walk': Animation(sprites.animation_sprites('walk'), duration=0.5, repeat=True),
     'slash': Animation(sprites.animation_sprites('slash'), duration=0.5, repeat=False, flip_offset=(20, 0)),
+    'climb': Animation(sprites.animation_sprites('climb'), duration=0.4, repeat=True),  
 }
 
 
@@ -28,6 +29,7 @@ class Knight(Entity):
         self.grounded = True
         self.falling = False
         self.down_attack = False
+        self.laddering = False
         
         self.dead = False
         
@@ -39,48 +41,71 @@ class Knight(Entity):
 
         # Attack hitbox properties
         self.attacking = False
-        self.attack_type = None  # Can be 'slash' (shovel attack) or 'down_thrust'
+        self.attack_type = None 
         self.attack_hitbox = None
         self.attack_damage = 1
         
+        self.original_rect_width = rect.width if rect.width > 0 else 32
+        self.ladder_rect_width = 10
+        
         # Debug flag - ENSURE THIS IS TRUE
-        self.debug_mode = True
+        self.debug_mode = False  
 
         self.set_sprite('idle')
 
-        self.slash_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_slash.ogg')  # This is actually the shovel attack sound
+        self.slash_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_slash.ogg')  
         self.jump_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_jump.ogg')
         self.land_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_land.ogg')
 
     def on_event(self, event):
         if event.type == KEYDOWN:
-            if event.key == K_LEFT:
+            if event.key == K_a:
                 self.flip = True
                 self.vx = -10
                 if self.grounded:
                     self.set_animation('walk')
-            if event.key == K_RIGHT:
+            if event.key == K_d:
                 self.flip = False
                 self.vx = 10
                 if self.grounded:
                     self.set_animation('walk')
-            if event.key == K_UP:
-                if self.grounded:
+                    
+            # Handle ladder movement
+            if self.laddering:
+                if event.key == K_w:
+                    self.vy = -10
+                    self.set_animation('climb')
+                if event.key == K_s:
+                    self.vy = 10
+                    self.set_animation('climb')
+                if event.key == K_SPACE:
                     self.jump_sound.play()
                     self.vy = -40
                     self.grounded = False
+                    self.exit_ladder_mode()  # Use helper method
                     self.animation = None
                     self.set_sprite('jump')
-            if event.key == K_DOWN:
+                    if self.debug_mode:
+                        print("Jumped off ladder")
+
+            elif event.key == K_SPACE and self.grounded:
+                self.jump_sound.play()
+                self.vy = -40
+                self.grounded = False
+                self.animation = None
+                self.set_sprite('jump')
+                if self.debug_mode:
+                    print("Normal jump")
+                            
+            if event.key == K_s:
                 if not self.grounded:
                     self.down_attack = True
                     self.attack_type = 'down_thrust'
                     self.set_sprite('down_thrust')
-            if event.key == K_SPACE:
+            if event.key == K_f:
                 if self.debug_mode:
                     print("Space pressed - Starting shovel attack")
                     
-                # Reset any existing attack state to ensure clean start
                 if self.attacking:
                     self.attacking = False
                     self.attack_hitbox = None
@@ -89,64 +114,170 @@ class Knight(Entity):
                 self.slash_sound.play()
                 self.set_animation('slash')
                 self.attacking = True
-                self.attack_type = 'slash'  # The slash animation is actually the shovel attack
-                
-                # Reset attack timer for time-based cleanup
-                self.attack_timer = 0.5  # Match animation duration
-                
-                # Create attack hitbox immediately when attacking begins
+                self.attack_type = 'slash'  
+            
+                self.attack_timer = 0.5  
+            
                 self.update_attack_hitbox()
+                
         if event.type == KEYUP:
-            if event.key in (K_LEFT, K_RIGHT):
+            if event.key in (K_a, K_d):
                 self.animation = None
                 self.vx = 0
                 if self.grounded:
                     self.set_sprite('idle')
+            
+            # Stop vertical movement when keys are released on ladder
+            if self.laddering and event.key in (K_w, K_s):
+                self.vy = 0
+                self.set_animation('climb')
+
+    def find_nearby_ladder(self, tiles, max_distance=20):  # Reduced from 40 to 20
+        for tile in tiles:
+            if tile.type == 'ladder':
+                # Check horizontal distance to ladder center
+                ladder_center_x = tile.rect.centerx
+                player_center_x = self.rect.centerx
+                horizontal_distance = abs(ladder_center_x - player_center_x)
+                
+                # Check if player overlaps vertically with ladder
+                player_bottom = self.rect.bottom
+                player_top = self.rect.top
+                ladder_bottom = tile.rect.bottom
+                ladder_top = tile.rect.top
+                
+                # More strict vertical overlap check
+                vertical_overlap = (player_bottom >= ladder_top and player_top <= ladder_bottom)
+                
+                if horizontal_distance <= max_distance and vertical_overlap:
+                    return tile
+        return None
 
     def move(self, tiles):
         self.collision = {'left': False, 'right': False,
-                          'top': False, 'bottom': False}
-
+                    'top': False, 'bottom': False}
+    
+        # Check for UP key press to grab ladder
+        keys = pg.key.get_pressed()
+        if keys[K_w] and not self.laddering:
+            nearby_ladder = self.find_nearby_ladder(tiles, max_distance=15)
+            if nearby_ladder:
+                if self.debug_mode:
+                    print("Grabbing ladder!")
+                # Snap to ladder center and make hitbox smaller
+                self.rect.centerx = nearby_ladder.rect.centerx
+                self.rect.width = self.ladder_rect_width
+                self.laddering = True
+                self.grounded = False
+                self.vy = 0
+                self.set_animation('climb')
+        
+        # Check if we should exit ladder mode (when not pressing UP/DOWN and moving horizontally)
+        if self.laddering and (keys[K_a] or keys[K_d]) and not (keys[K_w] or keys[K_s]):
+            current_ladder = None
+            for tile in tiles:
+                if tile.type == 'ladder' and self.rect.colliderect(tile.rect):
+                    current_ladder = tile
+                    break
+            
+            # If we're moving away from the ladder horizontally, exit ladder mode
+            if not current_ladder:
+                self.exit_ladder_mode()
+        
+        # Handle horizontal movement
         if self.vx != 0:
             self.rect.x += self.vx*dt
             hit_list = self.collisions(tiles)
 
             for tile in hit_list:
-                if self.vx > 0:
-                    if tile.type != 'ladder':
+                if tile.type not in ('ladder', 'win_trigger'):
+                    if self.vx > 0:
                         self.rect.right = tile.rect.left
                         self.collision['right'] = True
-                elif self.vx < 0:
-                    if tile.type != 'ladder':
+                    elif self.vx < 0:
                         self.rect.left = tile.rect.right
                         self.collision['left'] = True
+                    
+                    if self.debug_mode:
+                        print(f"Horizontal collision with {tile.type}")
+                elif tile.type == 'win_trigger' and self.debug_mode:
+                    print(f"Win trigger detected at {tile.rect}")
 
-        self.rect.y += self.vy*dt
-        self.vy += 0.5*g*dt**2
+        # Handle vertical movement
+        if self.laddering:
+            # On ladder: no gravity, just move based on input
+            self.rect.y += self.vy*dt
+            
+            # Check if we've left the ladder bounds
+            current_ladder = None
+            for tile in tiles:
+                if tile.type == 'ladder' and self.rect.colliderect(tile.rect):
+                    current_ladder = tile
+                    break
+            
+            # NEW: Check if there's a narrow gap above when moving up
+            if not current_ladder and self.vy < 0:
+                # Check if there's a gap we can pass through
+                gap_width = self.check_overhead_gap(tiles)
+                
+                if gap_width > 0 and gap_width <= 32:  # One tile width or less
+                    if self.debug_mode:
+                        print(f"Found overhead gap of width {gap_width}, continuing ladder climb")
+                    # Continue climbing through the gap
+                    # Don't exit ladder mode yet, keep moving up
+                    pass
+                else:
+                    # No gap or gap too wide, exit ladder mode normally
+                    if self.debug_mode:
+                        print("Left ladder bounds - no suitable gap found")
+                    self.exit_ladder_mode()
+                    self.grounded = True
+                    self.vy = 0
+                    self.set_sprite('idle')
+            elif not current_ladder:
+                # Moving down or sideways and left ladder
+                if self.debug_mode:
+                    print("Left ladder bounds")
+                self.exit_ladder_mode()
+                if self.vy < 0:
+                    self.grounded = True
+                    self.vy = 0
+                    self.set_sprite('idle')
+                    
+        else:
+            # Normal movement: apply gravity
+            self.rect.y += self.vy*dt
+            self.vy += 0.5*g*dt**2
+            
+            # Check if we should transition to falling state
+            if self.vy > 9 and not self.grounded:
+                if not self.down_attack:
+                    self.animation = None
+                    self.set_sprite('fall')
 
-        if self.vy > 9:
-            if self.grounded:
-                self.grounded = False
-                self.animation = None
-                self.set_sprite('fall')
-
+        # Check vertical collisions (only for non-ladder tiles)
         hit_list = self.collisions(tiles)
-
+        
+        # Process standard tile collisions
         for tile in hit_list:
-            if self.vy > 0:
-                if tile.type != 'ladder':
+            # Don't block movement on win triggers or ladders
+            if tile.type != 'ladder' and tile.type != 'win_trigger':
+                if self.vy > 0:
                     self.rect.bottom = tile.rect.top
                     self.collision['bottom'] = True
-            elif self.vy < 0:
-                if tile.type != 'ladder':
+                elif self.vy < 0:
                     self.rect.top = tile.rect.bottom
                     self.collision['top'] = True
-
-        if not self.falling and self.vy > 0 and not self.grounded:
+            elif tile.type == 'win_trigger' and self.debug_mode:
+                print(f"Player rect: {self.rect}, Win trigger: {tile.rect}")
+        
+        # Handle transition to falling state
+        if not self.falling and self.vy > 0 and not self.grounded and not self.laddering:
             if not self.down_attack:
                 self.set_sprite('fall')
             self.falling = True
-
+        
+        # Stop vertical motion when hitting ground
         if self.collision['bottom'] == True:
             self.vy = 0
 
@@ -161,15 +292,25 @@ class Knight(Entity):
             self.grounded = True
             self.falling = False
             self.down_attack = False
+            
+            if self.laddering:
+                self.exit_ladder_mode()
 
         if self.collision['top'] == True:
             self.vy = 0
-            
-    def check_hazard_collisions(self, spikes):      # checking spikes / other hazards function
-        if not self.invulnerable:                   # checks if we can take damage 
+                
+    def exit_ladder_mode(self):
+        if self.laddering:
+            self.laddering = False
+            self.rect.width = self.original_rect_width  
+            if self.debug_mode:
+                print("Exited ladder mode, hitbox restored")
+
+    def check_hazard_collisions(self, spikes):      
+        if not self.invulnerable:                   
             spike_hit = self.collisions(spikes)     
             if spike_hit:
-                self.take_damage(1)
+                self.take_damage(100)
                 return True
         return False
     
@@ -339,25 +480,90 @@ class Knight(Entity):
                 self.invulnerable = False
                 self.invulnerable_timer = 0
                 
-    def draw(self, surface, offset=(0, 0)):
-        # For animation/sprite rendering
-        super().draw(surface, offset)
+    def check_overhead_gap(self, tiles):
+        detection_height = 40  
+        detection_rect = Rect(
+            self.rect.x - 20, 
+            self.rect.y - detection_height,
+            self.rect.width + 40,
+            detection_height
+        )
         
-        # Always draw the attack hitbox when it exists and debug mode is on
+        blocking_tiles = []
+        for tile in tiles:
+            if tile.type not in ('ladder', 'win_trigger') and detection_rect.colliderect(tile.rect):
+                blocking_tiles.append(tile)
+        
+        if not blocking_tiles:
+            return 0  
+      
+        blocking_tiles.sort(key=lambda t: t.rect.x)
+        
+        player_center = self.rect.centerx
+        
+        
+        for i in range(len(blocking_tiles) - 1):
+            left_tile = blocking_tiles[i]
+            right_tile = blocking_tiles[i + 1]
+            
+            gap_start = left_tile.rect.right
+            gap_end = right_tile.rect.left
+            gap_width = gap_end - gap_start
+            
+            
+            if gap_start <= player_center <= gap_end:
+                if self.debug_mode:
+                    print(f"Found gap: width={gap_width}, start={gap_start}, end={gap_end}")
+                return gap_width
+        
+        
+        if blocking_tiles:
+            leftmost_tile = blocking_tiles[0]
+            if leftmost_tile.rect.left > detection_rect.left:
+                left_gap = leftmost_tile.rect.left - detection_rect.left
+                if detection_rect.left <= player_center <= leftmost_tile.rect.left:
+                    return left_gap
+            
+
+            rightmost_tile = blocking_tiles[-1]
+            if rightmost_tile.rect.right < detection_rect.right:
+                right_gap = detection_rect.right - rightmost_tile.rect.right
+                if rightmost_tile.rect.right <= player_center <= detection_rect.right:
+                    return right_gap
+        
+        return -1  
+                
+    def draw(self, surface, offset=(0, 0)):
+        super().draw(surface, offset)
+    
         if self.attack_hitbox and self.debug_mode:
-            # Make sure to properly offset the hitbox for camera position
+            
             debug_hitbox = Rect(
                 self.attack_hitbox.x - offset[0],
                 self.attack_hitbox.y - offset[1],
                 self.attack_hitbox.width,
                 self.attack_hitbox.height
             )
-            # Draw a more visible hitbox
-            pg.draw.rect(surface, (255, 0, 0), debug_hitbox, 2)
             
-            # Adding fill to make it more visible
+            pg.draw.rect(surface, (255, 0, 0), debug_hitbox, 2)
             hitbox_fill = debug_hitbox.copy()
-            hitbox_fill_color = (255, 0, 0, 128)  # Red with transparency
             hitbox_surface = pg.Surface((hitbox_fill.width, hitbox_fill.height), pg.SRCALPHA)
-            hitbox_surface.fill((255, 0, 0, 64))  # Semi-transparent red
+            hitbox_surface.fill((255, 0, 0, 64))  
             surface.blit(hitbox_surface, (hitbox_fill.x, hitbox_fill.y))
+            
+        
+        if self.debug_mode:
+            char_hitbox = Rect(
+                self.rect.x - offset[0],
+                self.rect.y - offset[1],
+                self.rect.width,
+                self.rect.height
+            )
+            hitbox_color = (0, 255, 255) if self.laddering else (0, 255, 0)  
+            pg.draw.rect(surface, hitbox_color, char_hitbox, 1)
+            
+           
+            ladder_status = f"On Ladder (W:{self.rect.width})" if self.laddering else f"Normal (W:{self.rect.width})"
+            status_color = (0, 255, 0) if self.laddering else (255, 255, 255)
+            status_text = pg.font.SysFont('Arial', 12).render(ladder_status, True, status_color)
+            surface.blit(status_text, (self.rect.x - offset[0], self.rect.y - offset[1] - 20))
