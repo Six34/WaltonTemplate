@@ -9,21 +9,21 @@ base_path = os.path.dirname(__file__)
 
 # Create paths for both images
 plains_path = os.path.join(base_path, '../assets/images/plains.png')
-door_path = os.path.join(base_path, '../assets/images/DOOR.png')  # Assuming DOOR.png is in the same directory
+door_path = os.path.join(base_path, '../assets/images/DOOR.png')
 
 # Try to load door image with error handling
 try:
     door_image_raw = pg.image.load(door_path)
+    print(f"Original door size: {door_image_raw.get_size()}")
 except pg.error:
-    # If DOOR.png is in a different location, try the parent directory
     door_path = os.path.join(base_path, '../DOOR.png')
     try:
         door_image_raw = pg.image.load(door_path)
+        print(f"Original door size: {door_image_raw.get_size()}")
     except pg.error:
         print(f"Warning: Could not load door image from {door_path}")
-        # Create a placeholder surface if door image can't be loaded
-        door_image_raw = pg.Surface((16, 16))
-        door_image_raw.fill((139, 69, 19))  # Brown color as placeholder
+        door_image_raw = pg.Surface((16, 32))
+        door_image_raw.fill((139, 69, 19))
 
 sprites = SpriteSheet(plains_path, {
     'bg': (0, 20, 150, 90),
@@ -38,6 +38,10 @@ sprites = SpriteSheet(plains_path, {
     'sp': (352, 240, 16, 16),
 })
 
+# Create a proper 16x32 door sprite (1 tile wide, 2 tiles tall)
+door_sprite = pg.transform.smoothscale(door_image_raw, (16, 32))
+print(f"Door sprite scaled to: {door_sprite.get_size()}")
+
 sprite_mapping = {
     '[': sprites.sprite('g0'),
     '=': sprites.sprite('g1'),
@@ -46,7 +50,7 @@ sprite_mapping = {
     '.': sprites.sprite('g6'),
     'M': sprites.sprite('sp'),
     'H': sprites.sprite('ld'),
-    'W': door_image_raw,  
+    'W': door_sprite,
 }
 
 
@@ -61,13 +65,12 @@ class Level:
         self.tiles = []
         self.entities = []
         self.win_triggers = []
-        self.spikes = []  
+        self.spikes = []
         
-        # Extract level number from filename (e.g., level_1.txt → 1)
         try:
             self.level_number = int(data.split('level_')[1].split('.')[0])
         except:
-            self.level_number = 1  # Default to level 1 if parsing fails
+            self.level_number = 1
         
         with open(data) as file:
             self.array = file.read().split('\n')
@@ -84,11 +87,19 @@ class Level:
 
                 if k != ' ':
                     if k not in ('P', 'B'):
-                        # Special handling for door image scaling
+                        # Handle door specially - it's 2 tiles tall
                         if k == 'W':
-                            # Scale the door image to fit 16x16 tile if needed
-                            scaled_door = pg.transform.scale(door_image_raw, (16, 16))
-                            self.map.blit(scaled_door, (j*16, i*16))
+                            # Draw the door starting from current position, extending upward
+                            # The door bottom should align with the tile where 'W' is placed
+                            door_x = j * 16
+                            door_y = i * 16 - 16  # Move up by 16 pixels so door spans this tile and the one above
+                            
+                            # Make sure we don't draw above the map bounds
+                            if door_y >= 0:
+                                self.map.blit(sprite_mapping[k], (door_x, door_y))
+                            else:
+                                # If we can't fit the full door, just draw it starting from the current position
+                                self.map.blit(sprite_mapping[k], (door_x, i * 16))
                         else:
                             self.map.blit(sprite_mapping[k], (j*16, i*16))
 
@@ -101,9 +112,16 @@ class Level:
                             self.spikes.append(spike_tile)
                         elif k == 'W':
                             _type = 'win_trigger'
-                            win_tile = Tile(Rect(j*16, i*16, 16, 16), _type)
-                            self.win_triggers.append(win_tile)
-                            self.tiles.append(win_tile)
+                            # Create win trigger for both tiles that the door occupies
+                            win_tile_bottom = Tile(Rect(j*16, i*16, 16, 16), _type)
+                            self.win_triggers.append(win_tile_bottom)
+                            # DON'T add door tiles to self.tiles - they shouldn't show collision debug
+                            
+                            # Also create trigger for the tile above (if it exists)
+                            if i > 0:
+                                win_tile_top = Tile(Rect(j*16, (i-1)*16, 16, 16), _type)
+                                self.win_triggers.append(win_tile_top)
+                                # DON'T add this to self.tiles either
                         else:
                             _type = 'block'
                             self.tiles.append(Tile(Rect(j*16, i*16, 16, 16), _type))

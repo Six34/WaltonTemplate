@@ -49,23 +49,28 @@ class Knight(Entity):
         self.ladder_rect_width = 10
         
         # Debug flag - ENSURE THIS IS TRUE
-        self.debug_mode = False  
+        self.debug_mode = False
 
         self.set_sprite('idle')
 
         self.slash_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_slash.ogg')  
         self.jump_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_jump.ogg')
         self.land_sound = pg_mixer.Sound('ShovelKnight/assets/sounds/knight_land.ogg')
+        self.slash_sound.set_volume(0.1)
+        self.jump_sound.set_volume(0.1)
+        self.land_sound.set_volume(0.1)
 
     def on_event(self, event):
         if event.type == KEYDOWN:
             if event.key == K_a:
                 self.flip = True
+                print(f"Moving left, flip = {self.flip}")  # Add this line
                 self.vx = -10
                 if self.grounded:
                     self.set_animation('walk')
             if event.key == K_d:
                 self.flip = False
+                print(f"Moving right, flip = {self.flip}")  # Add this line
                 self.vx = 10
                 if self.grounded:
                     self.set_animation('walk')
@@ -131,6 +136,7 @@ class Knight(Entity):
             if self.laddering and event.key in (K_w, K_s):
                 self.vy = 0
                 self.set_animation('climb')
+
 
     def find_nearby_ladder(self, tiles, max_distance=20):  # Reduced from 40 to 20
         for tile in tiles:
@@ -208,6 +214,8 @@ class Knight(Entity):
             # On ladder: no gravity, just move based on input
             self.rect.y += self.vy*dt
             
+            self.center_on_ladder(tiles)
+            
             # Check if we've left the ladder bounds
             current_ladder = None
             for tile in tiles:
@@ -215,27 +223,7 @@ class Knight(Entity):
                     current_ladder = tile
                     break
             
-            # NEW: Check if there's a narrow gap above when moving up
-            if not current_ladder and self.vy < 0:
-                # Check if there's a gap we can pass through
-                gap_width = self.check_overhead_gap(tiles)
-                
-                if gap_width > 0 and gap_width <= 32:  # One tile width or less
-                    if self.debug_mode:
-                        print(f"Found overhead gap of width {gap_width}, continuing ladder climb")
-                    # Continue climbing through the gap
-                    # Don't exit ladder mode yet, keep moving up
-                    pass
-                else:
-                    # No gap or gap too wide, exit ladder mode normally
-                    if self.debug_mode:
-                        print("Left ladder bounds - no suitable gap found")
-                    self.exit_ladder_mode()
-                    self.grounded = True
-                    self.vy = 0
-                    self.set_sprite('idle')
-            elif not current_ladder:
-                # Moving down or sideways and left ladder
+            if not current_ladder:
                 if self.debug_mode:
                     print("Left ladder bounds")
                 self.exit_ladder_mode()
@@ -480,64 +468,54 @@ class Knight(Entity):
                 self.invulnerable = False
                 self.invulnerable_timer = 0
                 
-    def check_overhead_gap(self, tiles):
-        detection_height = 40  
-        detection_rect = Rect(
-            self.rect.x - 20, 
-            self.rect.y - detection_height,
-            self.rect.width + 40,
-            detection_height
-        )
-        
-        blocking_tiles = []
-        for tile in tiles:
-            if tile.type not in ('ladder', 'win_trigger') and detection_rect.colliderect(tile.rect):
-                blocking_tiles.append(tile)
-        
-        if not blocking_tiles:
-            return 0  
-      
-        blocking_tiles.sort(key=lambda t: t.rect.x)
-        
-        player_center = self.rect.centerx
-        
-        
-        for i in range(len(blocking_tiles) - 1):
-            left_tile = blocking_tiles[i]
-            right_tile = blocking_tiles[i + 1]
+    def center_on_ladder(self, tiles):
+        if self.laddering:
+            current_ladder = None
+            for tile in tiles:
+                if tile.type == 'ladder' and self.rect.colliderect(tile.rect):
+                    current_ladder = tile
+                    break
             
-            gap_start = left_tile.rect.right
-            gap_end = right_tile.rect.left
-            gap_width = gap_end - gap_start
-            
-            
-            if gap_start <= player_center <= gap_end:
+            if current_ladder:
+                # Center the player's hitbox on the ladder
+                self.rect.centerx = current_ladder.rect.centerx
                 if self.debug_mode:
-                    print(f"Found gap: width={gap_width}, start={gap_start}, end={gap_end}")
-                return gap_width
-        
-        
-        if blocking_tiles:
-            leftmost_tile = blocking_tiles[0]
-            if leftmost_tile.rect.left > detection_rect.left:
-                left_gap = leftmost_tile.rect.left - detection_rect.left
-                if detection_rect.left <= player_center <= leftmost_tile.rect.left:
-                    return left_gap
-            
-
-            rightmost_tile = blocking_tiles[-1]
-            if rightmost_tile.rect.right < detection_rect.right:
-                right_gap = detection_rect.right - rightmost_tile.rect.right
-                if rightmost_tile.rect.right <= player_center <= detection_rect.right:
-                    return right_gap
-        
-        return -1  
-                
+                    print(f"Centered on ladder: player centerx={self.rect.centerx}, ladder centerx={current_ladder.rect.centerx}")
+                    
     def draw(self, surface, offset=(0, 0)):
-        super().draw(surface, offset)
-    
-        if self.attack_hitbox and self.debug_mode:
+        sprite_x = self.rect.x - offset[0]
+        sprite_y = self.rect.y - offset[1]
+
+        # If on ladder, adjust sprite position to center it with the narrow hitbox
+        if self.laddering:
+            # Calculate the difference between original width and ladder width
+            width_difference = self.original_rect_width - self.ladder_rect_width
+            # Offset the sprite to center it on the narrow hitbox
+            sprite_x -= width_difference // 2
+        
+        # Get the current sprite (already flipped by parent Entity.set_sprite if needed)
+        sprite = self.sprite
+        if sprite:
+            # REMOVED: Don't flip here - parent class already handles it in set_sprite()
+            # The Entity.set_sprite() method already applies the flip transformation
             
+            # Apply invulnerability flashing effect
+            if self.invulnerable:
+                # Create flashing effect by modulating alpha
+                flash_rate = 10  # flashes per second
+                flash_time = self.invulnerable_timer * flash_rate
+                if int(flash_time) % 2:  # Flash on/off
+                    # Create a copy of the sprite with reduced alpha
+                    temp_sprite = sprite.copy()
+                    temp_sprite.set_alpha(128)  # Semi-transparent
+                    surface.blit(temp_sprite, (sprite_x, sprite_y))
+                else:
+                    surface.blit(sprite, (sprite_x, sprite_y))
+            else:
+                surface.blit(sprite, (sprite_x, sprite_y))
+
+        # Debug visualization (attack hitbox)
+        if self.attack_hitbox and self.debug_mode:
             debug_hitbox = Rect(
                 self.attack_hitbox.x - offset[0],
                 self.attack_hitbox.y - offset[1],
@@ -551,7 +529,7 @@ class Knight(Entity):
             hitbox_surface.fill((255, 0, 0, 64))  
             surface.blit(hitbox_surface, (hitbox_fill.x, hitbox_fill.y))
             
-        
+        # Debug visualization (character hitbox)
         if self.debug_mode:
             char_hitbox = Rect(
                 self.rect.x - offset[0],
@@ -562,8 +540,17 @@ class Knight(Entity):
             hitbox_color = (0, 255, 255) if self.laddering else (0, 255, 0)  
             pg.draw.rect(surface, hitbox_color, char_hitbox, 1)
             
-           
+            # Status text with flip state for debugging
             ladder_status = f"On Ladder (W:{self.rect.width})" if self.laddering else f"Normal (W:{self.rect.width})"
+            flip_status = f" | Flip: {self.flip}"
+            status_text = ladder_status + flip_status
             status_color = (0, 255, 0) if self.laddering else (255, 255, 255)
-            status_text = pg.font.SysFont('Arial', 12).render(ladder_status, True, status_color)
-            surface.blit(status_text, (self.rect.x - offset[0], self.rect.y - offset[1] - 20))
+            status_display = pg.font.SysFont('Arial', 12).render(status_text, True, status_color)
+            surface.blit(status_display, (self.rect.x - offset[0], self.rect.y - offset[1] - 20))
+
+    def update_sprite_flip(self):
+        """Call this whenever you change the flip state to refresh the sprite"""
+        if self.animation:
+            self.set_sprite()  
+        else:
+            self.set_sprite('idle')  

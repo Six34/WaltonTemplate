@@ -33,7 +33,7 @@ class ShovelKnight(Game):
         self.small_font = pg.font.SysFont('Arial', 24)
         
         # Setup music
-        pg_mixer.music.set_volume(0.05)
+        pg_mixer.music.set_volume(0.02)
         pg_mixer.music.load('ShovelKnight/assets/sounds/music.ogg')
         pg_mixer.music.play(loops=-1)
         
@@ -135,15 +135,6 @@ class ShovelKnight(Game):
             level_text = self.small_font.render(f"Level: {self.current_level}", True, BLACK)
             self.surface.blit(level_text, (10, 30))
             
-            # DEBUG: Draw win triggers for debugging
-            for win_trigger in self.level.win_triggers:
-                debug_rect = Rect(
-                    win_trigger.rect.x - self.camera.pos[0],
-                    win_trigger.rect.y,  
-                    win_trigger.rect.width,
-                    win_trigger.rect.height
-                )
-                pg.draw.rect(self.surface, GREEN, debug_rect, 2)
             
         elif self.game_state == "game_over":
             # Draw the game over screen
