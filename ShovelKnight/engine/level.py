@@ -73,9 +73,30 @@ class Level:
             self.level_number = 1
         
         with open(data) as file:
-            self.array = file.read().split('\n')
-            self.w = len(self.array[0])
+            # Read all lines and normalize them
+            raw_lines = file.read().split('\n')
+            
+            # Remove trailing empty lines
+            while raw_lines and not raw_lines[-1].strip():
+                raw_lines.pop()
+            
+            # If no lines remain, create a minimal level
+            if not raw_lines:
+                raw_lines = ['P W']
+            
+            # Find the maximum width across all lines
+            max_width = max(len(line) for line in raw_lines) if raw_lines else 1
+            
+            # Pad all lines to the same width with spaces
+            self.array = []
+            for line in raw_lines:
+                padded_line = line.ljust(max_width)  # Pad with spaces to max_width
+                self.array.append(padded_line)
+            
+            self.w = max_width
             self.h = len(self.array)
+            
+        print(f"Level dimensions: {self.w}x{self.h}")
         self.map = Surface((self.w*16, self.h*16), pg.SRCALPHA)
 
         self.build_map()
@@ -83,7 +104,11 @@ class Level:
     def build_map(self):
         for i in range(self.h):
             for j in range(self.w):
-                k = self.array[i][j]
+                # Safe character access - default to space if index is out of bounds
+                if j < len(self.array[i]):
+                    k = self.array[i][j]
+                else:
+                    k = ' '
 
                 if k != ' ':
                     if k not in ('P', 'B'):
